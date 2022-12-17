@@ -1,0 +1,551 @@
+import io
+import dash
+import model
+import base64
+import pandas as pd
+import plotly.express as px
+import components.card as card
+import components.text as tc
+
+from dash.exceptions import PreventUpdate
+from dash import dash_table, dcc, html, ctx
+from components.uploaded_file import uploaded_file
+from dash.dependencies import Input, Output, State, ALL
+
+from sklearn import tree
+from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_score, recall_score, f1_score
+
+dash.register_page(__name__, path='/rekomendasi', order=2)
+
+
+# === LAYOUT FOR THIS PAGE === #
+def layout():
+    return [
+        html.Div([
+            html.Div([
+                card.rounded_full([
+                    tc.text_4xl('Sistem Rekomendasi'),
+                    tc.text_base(
+                        'Sebelum melakukan perhitungan rekomendasi, diharuskan untuk mengupload dataset terlebih dahulu!'
+                    ),
+
+                    dcc.Upload(
+                        id='upload-data',
+                        children=html.Div([
+                            'Upload Data Acuan'
+                        ]),
+                        accept='.csv, .xlsx, .xls',
+                        multiple=False,
+                        className='w-full h-16 border-2 border-dashed border-gray-400 rounded-lg flex justify-center items-center hover:bg-gray-100 hover:border-gray-500 duration-300 ease-in-out'
+                    ),
+
+                    uploaded_file(),
+                ])
+            ], className='w-full md:w-[30%]'),
+            
+            html.Div([
+                html.Div(children=[
+                    html.Div(id='output-data-upload')
+                ])
+            ], className='w-full md:w-[70%]'),
+        
+        ], className='flex flex-col md:flex-row w-full gap-5'),
+        
+        # store data and file name
+        dcc.Store(id='store-data', storage_type='memory'),
+        dcc.Store(id='store-filename', storage_type='memory'),
+    ]
+# === END OF LAYOUT === #
+
+
+# === BUILD INPUT NUMBER === #
+def build_input_number(data, filename):
+    status, dff = remove_unused_columns(pd.DataFrame(data))
+
+    if status == False:
+        return card.rounded_bottom([
+            html.P(className='text-red-500 text-xl mb-1 capitalize', children="Terjadi kesalahan pada data yang diupload!"),
+            html.P(className='text-red-500 text-sm mb-1 capitalize', children="Pastikan data yang diupload sudah sesuai dengan format yang ditentukan!"),
+        ])
+    
+    elif status == True:
+        status, dff = remove_target_column(dff)
+
+        if status == False:
+            return card.rounded_bottom([
+                html.P(className='text-red-500 text-xl mb-1 capitalize', children="Terjadi kesalahan pada data yang diupload!"),
+                html.P(className='text-red-500 text-sm mb-1 capitalize', children="Pastikan data yang diupload sudah sesuai dengan format yang ditentukan!"),
+            ])
+            
+        else :
+            structure = card.rounded_bottom([
+                html.Div(className='flex flex-wrap', children=[
+                    html.Div(className='px-3 basis-1/2 mb-3', children=[
+                        html.P(className='text-gray-500 text-sm mb-1 capitalize', children=i),
+                        dcc.Input(
+                            id={
+                                'type': 'input-number',
+                                'index': i.lower().replace(' ', '_')
+                            },
+                            type='number',
+                            min=0, max=100,
+                            value=0, step=1,
+                            name=i,
+                            className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent'
+                        )
+                    ]) for i in dff.columns
+                ]),
+
+                # button calculate
+                html.Button('Hitung', id='btn-calculate', className='mx-3 mt-5 px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary duration-300 ease-in-out'),
+            ])
+
+            return structure
+        
+    else: 
+        return card.rounded_bottom([
+            html.P(className='text-red-500 text-xl mb-1 capitalize', children="Terjadi kesalahan pada data yang diupload!"),
+            html.P(className='text-red-500 text-sm mb-1 capitalize', children="Pastikan data yang diupload sudah sesuai dengan format yang ditentukan!"),
+        ])
+
+    
+
+# ========================= ========================= ========================= # 
+# =========================|         CALLBACK        |========================= #
+# ========================= ========================= ========================= # 
+
+# === CALLBACK FOR STORE DATA === #
+@dash.callback(
+    Output('store-data', 'data'),
+    Output('store-filename', 'data'),
+    Output('upload-data', 'contents'),
+    Output('upload-data', 'filename'),
+
+    Input('upload-data', 'contents'),
+    Input('btn-close-file-uploaded', 'n_clicks'),
+
+    State('upload-data', 'filename'),
+    
+    prevent_initial_call=True
+)
+def store_data(list_of_contents, n_clicks, list_of_names):
+    if ctx.triggered_id == 'upload-data':
+        status, df = to_dataframe(list_of_contents)
+
+        return df.to_dict('records'), list_of_names, list_of_contents, list_of_names
+
+    elif ctx.triggered_id == 'btn-close-file-uploaded':
+        return None, None, None, None
+
+
+# === CALLBACK FOR SHOWING UPLOADED === #
+# === UNDER UPLOAD BUTTON === #
+@dash.callback(
+    Output('file-name-data-upload', 'children'),
+    Output('file-name-data-upload-container', 'style'),
+
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
+    
+    prevent_initial_call=True
+)
+def show_uploaded_file(data, filename):
+    if data is None:
+        structure = '', {'visibility': 'hidden', 'display': 'none'}
+    else:
+        structure = filename, {'visibility': 'visible', 'display': 'flex'}
+
+    return structure
+
+
+# === CALLBACK FOR BUILD TABS === #
+@dash.callback(
+    Output('output-data-upload', 'children'),
+    
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
+    
+    prevent_initial_call=True
+)
+def build_tabs(data, filename):
+    if data is None:
+        structure = None
+    else:
+        tab_style = {
+            'padding': '0px',
+        }
+        tab_selected_style = {
+            'padding': '0px',
+            'borderTop': '2px solid #65c3c8',
+        }
+
+        structure = [
+            dcc.Tabs(id="tab-dataset", value='spoiler-data', children=[
+                dcc.Tab(
+                    label='Spoiler Data', 
+                    value='spoiler-data',
+                    style=tab_style, selected_style=tab_selected_style
+                ),
+                dcc.Tab(
+                    label='Rekomendasi', 
+                    value='rekomendasi',
+                    style=tab_style, selected_style=tab_selected_style
+                ),
+                dcc.Tab(
+                    label='Mass Rekomendasi', 
+                    value='mass-rekomendasi',
+                    style=tab_style, selected_style=tab_selected_style
+                ),
+            ], className='sm:text-sm font-medium text-center text-gray-500 border-0', parent_className='shadow-md'),
+            dcc.Loading(children=[
+                html.Div(
+                    id='tabs-content-wrapper',
+                )
+            ], id='loading-datasets', type='default')
+        ]
+
+    return structure
+
+
+# === CALLBACK FOR RENDER === #
+# === AS TABLE === #
+# === IN TAB === #
+@dash.callback(
+    Output('tabs-content-wrapper', 'children'),
+    
+    Input('tab-dataset', 'value'),
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
+
+    prevent_initial_call=True
+)
+def render_content(tab, data, filename):
+    if tab == 'spoiler-data':
+        status, dff = to_dataframe(data)
+        
+        fig = px.bar(dff[dff.columns[-1]].value_counts())
+        fig.update_layout(showlegend=False)
+        fig.update_xaxes(showticklabels=False)
+
+        return html.Div(children=[
+            card.rounded_bottom([
+                build_datatable(data, filename),
+            ]),
+            
+            html.Div(className='mt-5', children=[
+                card.rounded_full([
+                    tc.text_xl('Visualisasi Data'),
+                    html.Div(className='mt-5', children=[
+                        dcc.Graph(figure=fig)
+                    ]),
+                ])
+            ])
+        ])
+
+    elif tab == 'rekomendasi':
+        return html.Div([
+            build_input_number(data, filename),
+            html.Div(id='output-rekomendasi', className='mt-5')
+        ])
+
+    elif tab == 'mass-rekomendasi':
+        return html.Div([
+            card.rounded_bottom([
+                html.Div([
+                    tc.text_xl('Rekomendasi Masal'),
+                    tc.text_base('Unggah file data baru anda yang akan dihitung untuk diberikan rekomendasi.'),
+                ], className='mb-5'),
+                
+                dcc.Upload(
+                    id='upload-mass-data',
+                    children=html.Div([
+                        'Upload Data Baru'
+                    ]),
+                    accept='.csv, .xlsx, .xls',
+                    multiple=False,
+                    className='w-full h-16 border-2 border-dashed border-gray-400 rounded-lg flex justify-center items-center hover:bg-gray-100 hover:border-gray-500 duration-300 ease-in-out'
+                ),
+            ]),
+
+            html.Div(id='output-mass-rekomendasi', className='mt-5')
+        ])
+
+
+# === CALLBACK FOR GET NUMBER === #
+# === FROM NUMERIC FIELD === #
+@dash.callback(
+    Output('output-rekomendasi', 'children'),
+    
+    Input('btn-calculate', 'n_clicks'),
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
+    
+    State({'type': 'input-number', 'index': ALL}, 'value'), # list
+)
+def get_input_number(n_clicks, data, filename, values):
+    if n_clicks is None:
+        raise PreventUpdate
+    else:
+        status, dff = get_clean_data(data, filename)
+        if status ==  False:
+            return html.Div([
+                tc.text_xl('Error'),
+                tc.text_base('Terjadi kesalahan pada data yang diunggah, silahkan cek kembali data yang diunggah.')
+            ])
+        
+        else:
+            result, acc = get_recomendaion(dff, values)
+
+            structure = html.Div([
+                tc.text_xl('Hasil Rekomendasi'),
+                
+                # value to dataframe
+                html.Pre(result, className='text-gray-500 text-sm mb-1'),
+                html.Pre(acc, className='text-gray-500 text-sm mb-1'),
+
+            ], className='card card-body bg-white rounded-xl shadow-md p-5')
+
+            return structure
+
+
+# === CALLBACK OUTPUT NASS RECOMENDATION === #
+@dash.callback(
+    Output('output-mass-rekomendasi', 'children'),
+
+    Input('upload-mass-data', 'contents'),
+    Input('upload-mass-data', 'filename'),
+
+    Input('store-data', 'data'),
+)
+def mass_calculate(contents, filename, data):
+    if contents is None:
+        raise PreventUpdate
+    else:
+        import base64, io
+
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+
+        if 'csv' in filename:
+            # Assume that the user uploaded a CSV file
+            df = pd.read_csv(
+                io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename:
+            # Assume that the user uploaded an excel file
+            df = pd.read_excel(io.BytesIO(decoded))
+
+        elif 'xlsx' in filename:
+            # Assume that the user uploaded an excel file
+            df = pd.read_excel(io.BytesIO(decoded))
+
+        df.columns = df.columns.str.lower()
+        df = df.dropna()
+        df = df.reset_index(drop=True)
+
+        res = model.mass_recomendation(data, df)
+        
+        structure = html.Div([
+            tc.text_xl('Hasil Rekomendasi'),
+            
+            html.Pre(res, className='text-gray-500 text-sm mb-1'),
+            
+            dash_table.DataTable(
+                id='table',
+                columns=[{"name": i, "id": i} for i in res.columns],
+                data=res.to_dict('records'),
+            )
+
+        ], className='card card-body bg-white rounded-xl shadow-md p-5')
+
+        return structure
+
+    
+# ========================= ========================= ========================= # 
+# =========================|      SELF FUNCTION      |========================= # 
+# ========================= ========================= ========================= # 
+    
+# === GET RECOMENDATION === #
+def get_recomendaion(data, values):
+    min_max_scaler = precision_score.MinMaxScaler()
+    
+    X = min_max_scaler.fit_transform(data.drop(columns=data.columns[-1], axis=1))
+    y = data[data.columns[-1]]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    model = tree.DecisionTreeClassifier(
+        criterion="entropy", 
+        max_depth=3,
+        # splitter="random"
+    )
+    
+    model.fit(X, y)
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+
+    y_pred = model.predict([values])
+
+    return y_pred, acc
+
+#=== END GET REOMENDASION ===#
+
+# === BUILD DATATABLE === #
+def build_datatable(data, filename):
+    if isinstance(data, pd.DataFrame):
+        dff = data
+    else:
+        dff = pd.DataFrame(data)
+
+    return html.Div(className='overflow-x-auto rounded-lg', children=[
+        dash_table.DataTable(
+            id='table',
+            columns=[{"name": i, "id": i} for i in dff.columns],
+            data=dff.to_dict('records'),
+            page_size=10,
+            style_table={
+                'border': '1px solid #ddd',
+                'borderCollapse': 'collapse',
+                'borderSpacing': '0',
+                'textAlign': 'left',
+                'width': 'auto',
+                'color': '#6B7280',
+            },
+            style_cell={
+                'padding': '5px',
+                'border': '1px solid #ddd',
+                'textAlign': 'left',
+                'fontFamily': 'sans-serif',
+                'fontSize': '14px',
+                'width': 'auto',
+                "padding-top": "0.2rem",
+                "padding-bottom": "0.2rem",
+                "padding-left": "1rem",
+                "padding-right": "1rem",
+            },
+            style_header={
+                'color': '#1F2937',
+                'backgroundColor': 'rgb(230, 230, 230)',
+                'fontWeight': 'bold',
+                'padding': '20px',
+            },
+            style_data_conditional=[
+                {
+                    'if': {'row_index': 'odd'},
+                    'backgroundColor': 'rgb(248, 248, 248)'
+                },
+                {
+                    'if': {'column_id': dff.columns[0]},
+                    'width': '50px !important',
+                    'text-align': 'center',
+                },
+                {
+                    'if': {'column_id': dff.columns[-1]},
+                    'whiteSpace': 'nowrap',
+                    'height': 'auto',
+                },
+            ],
+            style_data={
+                'whiteSpace': 'normal',
+                'height': 'auto',
+            },
+        )
+    ])
+# === END BUILD DATATABLE === #
+
+
+# === REMOVE UNUSED COLUMN === #
+def remove_unused_columns(data):
+    if isinstance(data, pd.DataFrame):
+        data.columns = data.columns.str.lower()
+    else:
+        data = pd.DataFrame(data)
+        data.columns = data.columns.str.lower()
+    
+    
+    if 'no' in data.columns and 'nama' in data.columns:
+        status = True
+        data = data.drop(['no', 'nama'], axis=1)
+    else :
+        status = False
+        data = pd.DataFrame()
+
+    return status, data
+# === END REMOVE UNUSED COLUMN === #
+
+
+# === CONVERT TO DATAFRAME === #
+def to_dataframe(contents):
+    if isinstance(contents, pd.DataFrame):
+        status = True
+        df = contents
+
+    elif isinstance(contents, list):
+        status = True
+        df = pd.DataFrame(contents)
+    
+    elif isinstance(contents, str):
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
+        
+        try:
+            if 'csv' in content_type:
+                status = True
+                df = pd.read_csv(
+                    io.StringIO(decoded.decode('utf-8'))
+                )
+            elif 'xls' in content_type:
+                status = True
+                df = pd.read_excel(
+                    io.BytesIO(decoded)
+                )
+            elif 'xlsx' in content_type:
+                status = True
+                df = pd.read_excel(
+                    io.BytesIO(decoded)
+                )
+
+        except Exception as e:
+            status = False
+            df = pd.DataFrame()
+            
+            
+    return status, df
+# === END CONVERT TO DATAFRAME === #
+
+
+# === REMOVE TARGET COLUMN === #
+def remove_target_column(data):
+    if isinstance(data, pd.DataFrame):
+        data.columns = data.columns.str.lower()
+    else:
+        data = pd.DataFrame(data)
+        data.columns = data.columns.str.lower()
+    
+    # if -1 column is categorical
+    if data.iloc[:, -1].dtype == 'object':
+        status = True
+        data = data.drop(data.columns[-1], axis=1)
+    else :
+        status = False
+        data = pd.DataFrame()
+    
+    return status, data
+# === END REMOVE TARGET COLUMN === #
+
+
+# === GET CLEAN DATA === #
+def get_clean_data(data):
+    status, data = to_dataframe(data)
+    if status :
+        status, data = remove_unused_columns(data)
+        if status :
+            return True, data
+        else:
+            return False, data
+    else:
+        return False, data
+# === END GET CLEAN DATA === # 
