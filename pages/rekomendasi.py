@@ -10,6 +10,11 @@ from dash.exceptions import PreventUpdate
 from dash.dependencies import Input, Output, State, ALL
 from components.uploaded_file import uploaded_file
 
+from sklearn import tree
+from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, ConfusionMatrixDisplay, accuracy_score, precision_score, recall_score, f1_score
+
 dash.register_page(__name__, path='/rekomendasi', order=2)
 
 # === TAB STYLE === #
@@ -76,6 +81,10 @@ def layout():
 # === END OF LAYOUT === #
 
 
+# ==================== ==================== ==================== #
+# ====================|      CALLBACK      |==================== #
+# ==================== ==================== ==================== #
+
 # === CALLBACKS TAB MENU === #
 @dash.callback(
     Output('tabs-content', 'children'),
@@ -128,20 +137,45 @@ def render_content(tab, data, dataname):
         elif tab == 'rekomendasi':
             out = html.Div([
                 card.rounded_bottom([
-                    html.Div([
-                        html.Div(children="Rekomendasi")
-                    ], className='w-full')
-                ])
+                    build_input_rekomendasi(data),
+                ]), 
+                html.Div(id='hasil-rekomendasi')
             ])
             
         elif tab == 'mass-rekomendasi':
-            out = html.Div([
-                card.rounded_bottom([
-                    html.Div([
-                        html.Div(children="Mass Rekomendasi")
-                    ], className='w-full')
+            if isinstance(data, pd.DataFrame):
+                dff = data
+
+            else:
+                status, dff = to_dataframe(data)
+
+                if dff.columns[0].lower()  != 'no' or dff.columns[1].lower() != 'nama' :
+                    out = card.rounded_bottom([
+                        html.P(className='text-red-500 text-xl mb-1 capitalize', children="Terjadi kesalahan pada data yang diupload!"),
+                        html.P(className='text-red-500 text-sm mb-1 capitalize', children="Pastikan data yang diupload sudah sesuai dengan format yang ditentukan!"),
+                    ])
+
+                else:
+                    out = html.Div([
+                        card.rounded_bottom([
+                        html.Div([
+                            tc.text_xl('Rekomendasi Masal'),
+                            tc.text_base('Unggah file data baru anda yang akan dihitung untuk diberikan rekomendasi.'),
+                        ], className='mb-5'),
+                        
+                        dcc.Upload(
+                            id='upload-mass-data',
+                            children=html.Div([
+                                'Upload Data Baru'
+                            ]),
+                            accept='.csv, .xlsx, .xls',
+                            multiple=False,
+                            className='w-full h-16 border-2 border-dashed border-gray-400 rounded-lg flex justify-center items-center hover:bg-gray-100 hover:border-gray-500 duration-300 ease-in-out'
+                        ),
+                    ]),
+
+                    html.Div(id='output-mass-rekomendasi', className='mt-5')
                 ])
-            ])
     
     return out
 # === END OF CALLBACKS TAB MENU === #
@@ -151,24 +185,142 @@ def render_content(tab, data, dataname):
 @dash.callback(
     Output('store-data', 'data'),
     Output('store-filename', 'data'),
-    
+    Output('upload-data', 'contents'),
+    Output('upload-data', 'filename'),
+
     Input('upload-data', 'contents'),
+    Input('btn-close-uploaded-file', 'n_clicks'),
     
     State('upload-data', 'filename'),
     State('upload-data', 'last_modified'),
 
     prevent_initial_call=True
 )
-def store_data(contents, filename, last_modified):
+def store_data(contents, n_clicks, filename, last_modified):
     if contents is None:
         raise PreventUpdate
     else:
-        # convert content to dataframe
-        status, data = to_dataframe(contents)
-        return data.to_dict('records'), filename
+       if ctx.triggered_id == 'upload-data':
+            status, data = to_dataframe(contents)
+            return data.to_dict('records'), filename, contents, filename
+        
+       else: 
+            return None, None, None, None
         
 # === END OF CALLBACKS STORE DATA === #
+    
 
+# === CALLBACK BUTTON REKOMENDASI === #
+@dash.callback(
+    Output('hasil-rekomendasi', 'children'),
+
+    Input('btn-rekomendasi', 'n_clicks'),
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
+
+    State({'type': 'input-nilai', 'index': ALL}, 'value'), # list
+    
+    prevent_initial_call=True
+)
+def rekomendasi(n_clicks, data, filename, nilai):
+    if n_clicks is None:
+        raise PreventUpdate
+    
+    else:
+        if data is None:
+            hasil = card.rounded_bottom([
+                html.Div(className='alert alert-error shadow-lg', children=[
+                    html.Div(className='flex items-center', children=[
+                        html.I(className='bi bi-x-circle text-lg mr-2'),
+                        html.P('Data Masih Belum Diupload!')
+                    ])
+                ])
+            ])
+        
+        else:
+            # convert content to dataframe
+            status, dff = to_dataframe(data)
+
+            if status == False:
+                hasil = card.rounded_bottom([
+                    html.Div(className='alert alert-error shadow-lg', children=[
+                        html.Div(className='flex items-center', children=[
+                            html.I(className='bi bi-x-circle text-lg mr-2'),
+                            html.P('Terjadi Kesanahan Pada Data Yang Diupload!')
+                        ])
+                    ])
+                ])
+
+            else :
+                min_max_scaler = preprocessing.MinMaxScaler()
+                model = tree.DecisionTreeClassifier(
+                    criterion="gini", 
+                    max_depth=3,
+                    splitter="best"
+                )
+
+                df_nilai = dff.drop(dff.columns[:2], axis=1)
+                df_nilai = df_nilai.drop(df_nilai.columns[-1], axis=1)
+                
+                X = min_max_scaler.fit_transform(df_nilai)
+                y = dff[dff.columns[-1]]
+
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.3, random_state=2
+                )
+
+                model.fit(X, y)
+
+                y_pred = model.predict(X_test)
+                acc = accuracy_score(y_test, y_pred)
+
+                pred = model.predict([nilai])
+
+                # get pred to html.pre
+                hasil = [
+                    html.Div([
+                        card.rounded_full([
+                            html.Div([
+                                tc.text_xl('Hasil Rekomendasi'),
+                                tc.text_base('Hasil rekomendasi untuk data yang diupload.'),
+                            ], className='mb-5'),
+                            
+                            card.rounded_full([
+                                html.Pre(pred)
+                            ]),
+
+                            html.Div(className='flex flex-wrap mt-3', children=[
+                                html.Div(className='w-[49%]', children=[
+                                    html.Div(className='flex items-center', children=[
+                                        html.Pre(f'Akurasi : {acc * 100:.2f} %'),
+                                    ]),
+                                ]),
+                                html.Div(className='w-[49%]', children=[
+                                    html.Div(className='flex items-center', children=[
+                                        html.Pre(f'Jumlah Data : {len(dff)}'),
+                                    ]),
+                                ]),
+                                html.Div(className='w-[49%]', children=[
+                                    html.Div(className='flex items-center', children=[
+                                        html.Pre(f'Jumlah Data Uji : {len(X_test)}'),
+                                    ]),
+                                ]),
+                                html.Div(className='w-[49%]', children=[
+                                    html.Div(className='flex items-center', children=[
+                                        html.Pre(f'Jumlah Data Latih {len(X_train)}'),
+                                    ]),
+                                ]),
+                                
+                            ]),
+                        ]),
+                    ], className='mt-5')
+                ]
+
+    
+    return hasil
+# === END OF CALLBACKS BUTTON REKOMENDASI === #
+
+    
 # === CALLBACKS UPLOADED FILE === #
 # === SHOW UPLOADED FILE UNDER UPLOAD BUTTON === #
 @dash.callback(
@@ -189,6 +341,49 @@ def show_uploaded_file(data, filename):
     return structure
 # === END OF CALLBACK UPLOADED FILE === #
 
+# ==================== ==================== ==================== #
+# ====================|     END CALLBACK   |==================== #
+# ==================== ==================== ==================== #
+
+
+
+# === REMOVE UNUSED COLUMN === #
+def remove_unused_columns(data):
+    if isinstance(data, pd.DataFrame):
+        data.columns = data.columns.str.lower()
+    else:
+        data = pd.DataFrame(data)
+        data.columns = data.columns.str.lower()
+    
+    
+    if 'no' in data.columns and 'nama' in data.columns:
+        status = True
+        data = data.drop(['no', 'nama'], axis=1)
+    else :
+        status = False
+        data = pd.DataFrame()
+
+    return status, data
+# === END REMOVE UNUSED COLUMN === #
+
+# === REMOVE TARGET COLUMN === #
+def remove_target_column(data):
+    if isinstance(data, pd.DataFrame):
+        data.columns = data.columns.str.lower()
+    else:
+        data = pd.DataFrame(data)
+        data.columns = data.columns.str.lower()
+    
+    # if -1 column is categorical
+    if data.iloc[:, -1].dtype == 'object':
+        status = True
+        data = data.drop(data.columns[-1], axis=1)
+    else :
+        status = False
+        data = pd.DataFrame()
+    
+    return status, data
+# === END REMOVE TARGET COLUMN === #
 
 # === CONVERT TO DATAFRAME === #
 def to_dataframe(contents):
@@ -229,12 +424,62 @@ def to_dataframe(contents):
     return status, df
 # === END CONVERT TO DATAFRAME === #
 
+# === BUILD INPUT REKOMENDASI === #
+def build_input_rekomendasi(data):
+    false_data = html.Div([
+        html.P(className='text-red-500 text-xl mb-1 capitalize', children="Terjadi kesalahan pada data yang diupload!"),
+        html.P(className='text-red-500 text-sm mb-1 capitalize', children="Pastikan data yang diupload sudah sesuai dengan format yang ditentukan!"),
+    ])
+
+    if isinstance(data, pd.DataFrame):
+        dff = data
+    else:
+        status, dff = to_dataframe(data)
+
+        
+    if status == False:
+        return false_data
+    else:
+        status, dff = remove_unused_columns(dff)
+        
+        if status == False:
+            return false_data
+        else:
+            status, dff = remove_target_column(dff)
+            
+            if status == False:
+                return false_data
+            else:
+                return html.Div([
+                    html.Div(className='flex flex-wrap', children=[
+                        html.Div(className='px-3 basis-1/2 mb-3', children=[
+                            html.P(className='text-gray-500 text-sm mb-1 capitalize', children=i),
+                            dcc.Input(
+                                id={
+                                    'type': 'input-nilai',
+                                    'index': i.lower().replace(' ', '_')
+                                },
+                                type='number',
+                                min=0, max=100,
+                                value=0, step=1,
+                                name=i,
+                                className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent'
+                            )
+                        ]) for i in dff.columns
+                    ]),
+
+                    # button calculate
+                    html.Button('Rekomendasikan', id='btn-rekomendasi', className='mx-3 mt-5 px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary duration-300 ease-in-out'),
+                ])
+# === END OFBUILD INPUT REKOMENDASI === #
+
+
 # === BUILD DATATABLE === #
 def build_datatable(data):
     if isinstance(data, pd.DataFrame):
         dff = data
     else:
-        dff = pd.DataFrame(data)
+        status, dff = to_dataframe(data)
 
     return html.Div(className='overflow-x-auto rounded-lg', children=[
         dash_table.DataTable(
