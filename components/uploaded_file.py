@@ -8,8 +8,8 @@ def uploaded_file():
             className='text-gray-600',
         ),
         html.Button(
-            id='btn-close-uploaded-file', children="✖", n_clicks=0,
-            className='bg-red-500 text-white btn-circle w-6 h-6 ml-3 flex justify-center items-center'
+            id='btn-close-uploaded-file', children=html.I(className='bi bi-x text-xl'), n_clicks=0,
+            className='btn btn-circle btn-outline btn-sm btn-error'
         )
     ],
         id='uploaded-file',

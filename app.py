@@ -22,7 +22,7 @@ app = Dash(
     serve_locally=True,
     index_string='''
         <!DOCTYPE html>
-        <html data-theme="cupcake">
+        <html data-theme="light">
             <head>
                 <title>{%title%}</title>
                 

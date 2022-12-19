@@ -48,7 +48,7 @@ def layout():
             ], className='w-full md:w-[30%]'),
             
             html.Div([
-                dcc.Tabs(id="tab-menu", value='spoiler-data', children=[
+                dcc.Tabs(id="tab-menu", value='rekomendasi', children=[
                     dcc.Tab(
                         label='Spoiler Data', 
                         value='spoiler-data',
@@ -174,7 +174,7 @@ def render_content(tab, data, dataname):
                         ),
                     ]),
 
-                    html.Div(id='output-mass-rekomendasi', className='mt-5')
+                    html.Div(id='hasil-mass-rekomendasi', className='mt-5')
                 ])
     
     return out
@@ -320,7 +320,129 @@ def rekomendasi(n_clicks, data, filename, nilai):
     return hasil
 # === END OF CALLBACKS BUTTON REKOMENDASI === #
 
+# === CALLBACK MASS REKOMENDASI === #
+@dash.callback(
+    Output('hasil-mass-rekomendasi', 'children'),
+
+    Input('upload-mass-data', 'contents'),
+    Input('upload-mass-data', 'filename'),
+    Input('store-data', 'data'),
+    Input('store-filename', 'data'),
     
+    prevent_initial_call=True
+)
+def mass_rekomendasi(contents, filename, data, dataname):
+    if data is None:
+        hasil = card.rounded_bottom([
+            html.Div(className='alert alert-error shadow-lg', children=[
+                html.Div(className='flex items-center', children=[
+                    html.I(className='bi bi-x-circle text-lg mr-2'),
+                    html.P('Data Masih Belum Diupload!')
+                ])
+            ])
+        ])
+
+    else:
+        status, databaru = to_dataframe(contents)
+        namadatabaru = filename
+
+        stts, dataset = to_dataframe(data)
+        namadataset = dataname
+
+        #########################################
+
+        min_max_scaler = preprocessing.MinMaxScaler()
+        model = tree.DecisionTreeClassifier(
+            criterion="gini", 
+            max_depth=3,
+            splitter="best"
+        )
+
+        df_nilai = dataset.drop(dataset.columns[:2], axis=1)
+        df_nilai = df_nilai.drop(df_nilai.columns[-1], axis=1)
+
+        X = min_max_scaler.fit_transform(df_nilai)
+        y = dataset[dataset.columns[-1]]
+
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.3, random_state=2
+        )
+
+        model.fit(X, y)
+
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+
+        #########################################
+
+        if status == False:
+            hasil = card.rounded_bottom([
+                html.Div(className='alert alert-error shadow-lg', children=[
+                    html.Div(className='flex items-center', children=[
+                        html.I(className='bi bi-x-circle text-lg mr-2'),
+                        html.P('Terjadi Kesanahan Pada Data Yang Diupload!')
+                    ])
+                ])
+            ])
+
+        else:
+            df = databaru.drop(databaru.columns[:2], axis=1)
+            df = min_max_scaler.fit_transform(df)
+
+            pred = model.predict(df)
+
+            hasil = card.rounded_bottom([
+                html.Div(className='alert alert-success shadow-lg', children=[
+                    html.Div(className='flex items-center', children=[
+                        html.I(className='bi bi-check-circle text-lg mr-2'),
+                        html.P('Data Berhasil Diupload!')
+                    ])
+                ])
+            ])
+
+            hasil = [
+                html.Div([
+                    card.rounded_full([
+                        html.Div([
+                            tc.text_xl('Hasil Rekomendasi'),
+                            tc.text_base('Hasil rekomendasi untuk data yang diupload.'),
+                        ], className='mb-5'),
+                        
+                        card.rounded_full([
+                            html.Pre(pred)
+                        ]),
+
+                        html.Div(className='flex flex-wrap mt-3', children=[
+                            html.Div(className='w-[49%]', children=[
+                                html.Div(className='flex items-center', children=[
+                                    html.Pre(f'Akurasi : {acc * 100:.2f} %'),
+                                ]),
+                            ]),
+                            html.Div(className='w-[49%]', children=[
+                                html.Div(className='flex items-center', children=[
+                                    html.Pre(f'Jumlah Data : {len(dataset)}'),
+                                ]),
+                            ]),
+                            html.Div(className='w-[49%]', children=[
+                                html.Div(className='flex items-center', children=[
+                                    html.Pre(f'Jumlah Data Uji : {len(X_test)}'),
+                                ]),
+                            ]),
+                            html.Div(className='w-[49%]', children=[
+                                html.Div(className='flex items-center', children=[
+                                    html.Pre(f'Jumlah Data Latih {len(X_train)}'),
+                                ]),
+                            ]),
+                            
+                        ]),
+                    ]),
+                ], className='mt-5')
+            ]
+
+    return hasil
+# === END OF CALLBACKS MASS REKOMENDASI === #
+
+
 # === CALLBACKS UPLOADED FILE === #
 # === SHOW UPLOADED FILE UNDER UPLOAD BUTTON === #
 @dash.callback(
@@ -451,9 +573,9 @@ def build_input_rekomendasi(data):
                 return false_data
             else:
                 return html.Div([
-                    html.Div(className='flex flex-wrap', children=[
-                        html.Div(className='px-3 basis-1/2 mb-3', children=[
-                            html.P(className='text-gray-500 text-sm mb-1 capitalize', children=i),
+                    html.Div(className='flex flex-row flex-wrap', children=[
+                        html.Div(className='w-[49%] mb-3 px-2', children=[
+                            html.P(className='text-gray-500 text-xs mb-1 capitalize', children=i),
                             dcc.Input(
                                 id={
                                     'type': 'input-nilai',
@@ -463,13 +585,13 @@ def build_input_rekomendasi(data):
                                 min=0, max=100,
                                 value=0, step=1,
                                 name=i,
-                                className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent'
+                                className='input input-bordered w-full'
                             )
                         ]) for i in dff.columns
                     ]),
 
                     # button calculate
-                    html.Button('Rekomendasikan', id='btn-rekomendasi', className='mx-3 mt-5 px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary duration-300 ease-in-out'),
+                    html.Button('Rekomendasikan', id='btn-rekomendasi', className='mx-2 mt-5 px-5 py-2 bg-primary text-white rounded-lg hover:bg-primary duration-300 ease-in-out'),
                 ])
 # === END OFBUILD INPUT REKOMENDASI === #
 
