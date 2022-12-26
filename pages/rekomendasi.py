@@ -2,6 +2,7 @@ import dash
 import base64, io
 import pandas as pd
 import plotly.express as px
+import urllib
 import components.text as tc
 import components.card as card
 
@@ -397,8 +398,18 @@ def mass_rekomendasi(contents, filename, data, dataname):
                 html.Div([
                     card.rounded_full([
                         html.Div([
-                            tc.text_xl('Hasil Rekomendasi'),
-                            tc.text_base('Hasil rekomendasi untuk data yang diupload.'),
+                            # flex
+                            html.Div(className='flex justify-between items-center w-[100%] w-full', children=[
+                                html.Div(children=[
+                                    tc.text_xl('Hasil Rekomendasi'),
+                                    tc.text_base('Hasil rekomendasi untuk data yang diupload.'),
+                                ]),
+                                html.Div(children=[
+                                    html.Div(children=[
+                                        download_link(databaru)
+                                    ]),
+                                ]),
+                            ]),
                         ], className='mb-5'),
                         
                         # databaru to html table
@@ -434,10 +445,6 @@ def mass_rekomendasi(contents, filename, data, dataname):
                                 ],
                             ),
                         ], className='mb-5'),
-
-                        # card.rounded_full([
-                        #     html.Pre(pred)
-                        # ]),
 
                         html.Div(className='flex flex-wrap mt-3', children=[
                             html.Div(className='w-[49%]', children=[
@@ -685,3 +692,44 @@ def build_datatable(data):
         )
     ])
 # === END OF BUILD DATATABLE === #
+
+# === BUILD DOWNLOAD LINK === #
+def download_link(data):
+    if isinstance(data, pd.DataFrame):
+        dff = data
+    else:
+        status, dff = to_dataframe(data)
+
+    # data to csv
+    csv_string = dff.to_csv(index=False, encoding='utf-8')
+    csv_string = "data:text/csv;charset=utf-8," + urllib.parse.quote(csv_string)
+
+    # dff to excel download
+    output = io.BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    dff.to_excel(writer, sheet_name='Sheet1', index=False)
+    writer.save()
+    processed_data = output.getvalue()
+    spreadsheet_string = "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64," + base64.b64encode(processed_data).decode()
+
+    return html.Div(className='flex flex-row flex-wrap', children=[
+        html.Div(className='flex flex-row gap-2', children=[
+            html.A(
+                'CSV',
+                id='download-link',
+                download="data_csv.csv",
+                href=csv_string,
+                target="_blank",
+                className='btn btn-primary btn-sm duration-300 ease-in-out'
+            ),
+            html.A(
+                'Spreadsheet',
+                id='download-link',
+                download="data_excel.xlsx",
+                href=spreadsheet_string,
+                target="_blank",
+                className='btn btn-primary btn-sm duration-300 ease-in-out'
+            )
+        ]),
+    ])
+# === END OF BUILD DOWNLOAD LINK === #

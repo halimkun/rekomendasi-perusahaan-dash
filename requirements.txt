@@ -1,5 +1,8 @@
+xlwt
 dash
-pandas
 plotly
-scikit_learn
+pandas
 gunicorn
+odswriter
+XlsxWriter
+scikit_learn
