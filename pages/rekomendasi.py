@@ -48,7 +48,7 @@ def layout():
             ], className='w-full md:w-[30%]'),
             
             html.Div([
-                dcc.Tabs(id="tab-menu", value='rekomendasi', children=[
+                dcc.Tabs(id="tab-menu", value='mass-rekomendasi', children=[
                     dcc.Tab(
                         label='Spoiler Data', 
                         value='spoiler-data',
@@ -391,14 +391,7 @@ def mass_rekomendasi(contents, filename, data, dataname):
 
             pred = model.predict(df)
 
-            hasil = card.rounded_bottom([
-                html.Div(className='alert alert-success shadow-lg', children=[
-                    html.Div(className='flex items-center', children=[
-                        html.I(className='bi bi-check-circle text-lg mr-2'),
-                        html.P('Data Berhasil Diupload!')
-                    ])
-                ])
-            ])
+            databaru['Rekomendasi'] = pred
 
             hasil = [
                 html.Div([
@@ -408,9 +401,43 @@ def mass_rekomendasi(contents, filename, data, dataname):
                             tc.text_base('Hasil rekomendasi untuk data yang diupload.'),
                         ], className='mb-5'),
                         
-                        card.rounded_full([
-                            html.Pre(pred)
-                        ]),
+                        # databaru to html table
+                        html.Div([
+                            dash_table.DataTable(
+                                id='table-mass-rekomendasi',
+                                columns=[{"name": i, "id": i} for i in databaru.columns],
+                                data=databaru.to_dict('records'),
+                                style_table={
+                                    'overflowX': 'auto',
+                                    'overflowY': 'auto',
+                                    'maxHeight': '300px',
+                                    'maxWidth': '100%',
+                                    'minWidth': '100%',
+                                },
+                                style_cell={
+                                    'textAlign': 'center',
+                                    'whiteSpace': 'normal',
+                                    'height': 'auto',
+                                    'minWidth': '100px',
+                                    'maxWidth': '100px',
+                                    'width': '100px',
+                                },
+                                style_header={
+                                    'backgroundColor': 'rgb(230, 230, 230)',
+                                    'fontWeight': 'bold'
+                                },
+                                style_data_conditional=[
+                                    {
+                                        'if': {'row_index': 'odd'},
+                                        'backgroundColor': 'rgb(248, 248, 248)'
+                                    }
+                                ],
+                            ),
+                        ], className='mb-5'),
+
+                        # card.rounded_full([
+                        #     html.Pre(pred)
+                        # ]),
 
                         html.Div(className='flex flex-wrap mt-3', children=[
                             html.Div(className='w-[49%]', children=[
