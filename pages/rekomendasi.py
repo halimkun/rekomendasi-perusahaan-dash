@@ -544,12 +544,10 @@ def remove_target_column(data):
 # === CONVERT TO DATAFRAME === #
 def to_dataframe(contents):
     if isinstance(contents, pd.DataFrame):
-        status = True
-        df = contents
+        return True, contents
 
     elif isinstance(contents, list):
-        status = True
-        df = pd.DataFrame(contents)
+        return True, pd.DataFrame(contents)
     
     elif isinstance(contents, str):
         content_type, content_string = contents.split(',')
@@ -557,27 +555,32 @@ def to_dataframe(contents):
         
         try:
             if 'csv' in content_type:
-                status = True
                 df = pd.read_csv(
                     io.StringIO(decoded.decode('utf-8'))
                 )
+                return True, df
+            
             elif 'xls' in content_type:
-                status = True
                 df = pd.read_excel(
                     io.BytesIO(decoded)
                 )
+                return True, df
+            
             elif 'xlsx' in content_type:
-                status = True
                 df = pd.read_excel(
                     io.BytesIO(decoded)
                 )
+                return True, df
 
         except Exception as e:
-            status = False
-            df = pd.DataFrame()
+            return False, pd.DataFrame()
+    else:
+        try:
+            return True, pd.DataFrame(contents)
+        except:
+            return False, pd.DataFrame()
+        
             
-            
-    return status, df
 # === END CONVERT TO DATAFRAME === #
 
 # === BUILD INPUT REKOMENDASI === #
